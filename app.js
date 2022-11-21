@@ -7,6 +7,8 @@ const mongoose = require("mongoose");
 const session = require("express-session");
 const passport = require("passport");
 const passportLocalMongoose = require("passport-local-mongoose");
+const GoogleStrategy = require("passport-google-oauth20").Strategy;
+const findOrCreate = require("mongoose-findorcreate")
 // const bcrypt = require("bcrypt");
 // const saltRounds = 10;
 // const encrypt = require("mongoose-encryption");
@@ -34,20 +36,58 @@ mongoose.connect("mongodb://localhost:27017/userDB", { useNewUrlParser: true })
 
 const userSchema = new mongoose.Schema({
     email: String,
-    password: String
+    password: String,
+    //For Google Authentication:
+    googleId: String
 });
 
 // userSchema.plugin(encrypt, { secret: process.env.SECRET, encryptedFields: ["password"] })
 
 userSchema.plugin(passportLocalMongoose);
-
+//Add mongoose-findorcreate to the Schema as a plugin
+userSchema.plugin(findOrCreate);
 
 const User = new mongoose.model("User", userSchema);
 
 passport.use(User.createStrategy());
 
-passport.serializeUser(User.serializeUser());
-passport.deserializeUser(User.deserializeUser());
+//The below code will work for only local strategies:
+
+// passport.serializeUser(User.serializeUser());
+// passport.deserializeUser(User.deserializeUser());
+
+//The below code will work for all strategies:
+
+passport.serializeUser(function (user, cb) {
+    process.nextTick(function () {
+        return cb(null, {
+            id: user.id,
+            username: user.username,
+            picture: user.picture
+        });
+    });
+});
+
+passport.deserializeUser(function (user, cb) {
+    process.nextTick(function () {
+        return cb(null, user);
+    });
+});
+
+passport.use(new GoogleStrategy({
+    clientID: process.env.CLIENT_ID,
+    clientSecret: process.env.CLIENT_SECRET,
+    callbackURL: "http://localhost:3000/auth/google/secrets",
+    userProfileURL: "https://www.googleapis.com/oauth2/v3/userinfo"
+},
+    function (accessToken, refreshToken, profile, cb) {
+        console.log(profile);
+        //Install npm mongoose-findorcreate for this function to work:
+        User.findOrCreate({ googleId: profile.id }, function (err, user) {
+            return cb(err, user);
+        });
+    }
+));
 
 app.get("/", function (req, res) {
     res.render("home");
@@ -55,6 +95,18 @@ app.get("/", function (req, res) {
 app.get("/login", function (req, res) {
     res.render("login");
 })
+
+//Getting to the google sign in page:
+app.get("/auth/google", passport.authenticate("google", { scope: ["profile"] }));
+
+//Getting to the final Page after authentication by google:
+app.get("/auth/google/secrets",
+    passport.authenticate("google", { failureRedirect: "/login" }),
+    function (req, res) {
+        // Successful authentication, redirect home.
+        res.redirect("/secrets");
+    });
+
 app.get("/register", function (req, res) {
     res.render("register");
 })
